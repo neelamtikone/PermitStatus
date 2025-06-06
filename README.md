@@ -13,7 +13,7 @@ A Java application that monitors Recreation.gov permits and sends SMS notificati
 
 ## Prerequisites
 
-- Java 11 or higher
+- Java 17 or higher
 - Maven
 - Twilio account (for SMS notifications)
 
@@ -21,8 +21,8 @@ A Java application that monitors Recreation.gov permits and sends SMS notificati
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/permit-status.git
-cd permit-status
+git clone https://github.com/neelamtikone/PermitStatus.git
+cd PermitStatus
 ```
 
 2. Set up Twilio credentials as environment variables:
@@ -49,7 +49,7 @@ mvn clean package
 
 Run the application using:
 ```bash
-java -jar target/permit-status-1.0-SNAPSHOT-jar-with-dependencies.jar
+java -jar target/permit-status-1.0-SNAPSHOT.jar
 ```
 
 ## Monitoring
