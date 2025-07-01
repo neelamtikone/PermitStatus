@@ -11,6 +11,31 @@ A Java application that monitors Recreation.gov permits and sends SMS notificati
 - Configurable notification cooldown period
 - Comprehensive logging
 
+## NotificationService
+
+The `NotificationService` is a core component responsible for sending various types of SMS notifications to users regarding their permits. It acts as a bridge between the application's data layer (PermitRepository and UserRepository) and the Twilio-based SMS delivery system.
+
+### Responsibilities
+- Fetches permit and user details from the database.
+- Constructs context-specific messages for different permit-related events, such as:
+  - Status updates (approved, rejected, expired, etc.)
+  - Expiration warnings and renewal reminders
+  - Approval and rejection notifications
+  - Requests for additional documents
+  - Inspection scheduling
+  - Fee payment reminders
+  - Violation notices
+  - Emergency closure alerts
+- Sends these messages to the user's registered phone number using Twilio.
+
+### How It Works
+Each notification method in `NotificationService`:
+1. Retrieves the relevant user based on the permit's user ID.
+2. Builds a message tailored to the specific event or action.
+3. Uses the `TwilioService` to send the SMS notification to the user.
+
+This ensures users are kept informed about important actions and statuses related to their permits, helping them stay compliant and up-to-date. The service is designed to be used as a Spring-managed bean and is typically invoked by other components in the permit management workflow.
+
 ## Prerequisites
 
 - Java 17 or higher
