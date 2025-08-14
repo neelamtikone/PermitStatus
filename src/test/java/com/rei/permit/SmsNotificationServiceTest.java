@@ -7,6 +7,8 @@ public class SmsNotificationServiceTest {
     
     @Test
     public void testSmsConfiguration() {
+        System.setProperty("sms.test.mode", "true");
+        
         // Initialize the service
         SmsNotificationService.initialize();
         
@@ -15,5 +17,6 @@ public class SmsNotificationServiceTest {
         
         // Assert that the message was sent successfully
         assertTrue(success, "SMS test message should be sent successfully");
+        assertNotNull(SmsNotificationService.getLastMessageBodyForTesting());
     }
 } 

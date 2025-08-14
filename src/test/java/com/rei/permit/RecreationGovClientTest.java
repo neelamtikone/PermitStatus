@@ -2,42 +2,30 @@ package com.rei.permit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.HttpEntity;
+import org.apache.http.*;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.junit.jupiter.api.BeforeEach;
+import org.apache.http.message.BasicHttpResponse;
+import org.apache.http.message.BasicStatusLine;
+import org.apache.http.params.HttpParams;
+import org.apache.http.protocol.HttpContext;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.conn.ClientConnectionManager;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
 
 class RecreationGovClientTest {
-    @Mock
-    private CloseableHttpClient httpClient;
-    
-    @Mock
-    private CloseableHttpResponse response;
-    
-    private RecreationGovClient client;
-    private ObjectMapper objectMapper;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-        client = new RecreationGovClient(3, java.time.Duration.ofSeconds(10));
-        objectMapper = new ObjectMapper();
-    }
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void getPermitAvailability_Success() throws IOException {
-        // Prepare mock response
+    void getPermitAvailability_Success() throws Exception {
         String jsonResponse = "{\n" +
             "    \"availability\": [\n" +
             "        {\n" +
@@ -46,17 +34,16 @@ class RecreationGovClientTest {
             "        }\n" +
             "    ]\n" +
             "}";
-        
-        HttpEntity entity = mock(HttpEntity.class);
-        when(entity.getContent()).thenReturn(new ByteArrayInputStream(jsonResponse.getBytes(StandardCharsets.UTF_8)));
-        when(response.getEntity()).thenReturn(entity);
-        when(response.getStatusLine().getStatusCode()).thenReturn(200);
-        when(httpClient.execute(any())).thenReturn(response);
 
-        // Test the method
+        CloseableHttpResponse ok = new SimpleCloseableHttpResponse(
+            new BasicStatusLine(HttpVersion.HTTP_1_1, 200, "OK"),
+            new StringEntity(jsonResponse, StandardCharsets.UTF_8)
+        );
+
+        TestHttpClient httpClient = new TestHttpClient(ok);
+        RecreationGovClient client = new RecreationGovClient(httpClient, 3, Duration.ofSeconds(1));
+
         JsonNode result = client.getPermitAvailability("233260");
-
-        // Verify the result
         assertNotNull(result);
         assertTrue(result.has("availability"));
         assertEquals(1, result.get("availability").size());
@@ -65,18 +52,20 @@ class RecreationGovClientTest {
     }
 
     @Test
-    void getPermitAvailability_Error() throws IOException {
-        // Mock HTTP error
-        when(response.getStatusLine().getStatusCode()).thenReturn(500);
-        when(httpClient.execute(any())).thenReturn(response);
+    void getPermitAvailability_Error() {
+        CloseableHttpResponse error = new SimpleCloseableHttpResponse(
+            new BasicStatusLine(HttpVersion.HTTP_1_1, 500, "Internal Server Error"),
+            null
+        );
 
-        // Test the method
+        TestHttpClient httpClient = new TestHttpClient(error);
+        RecreationGovClient client = new RecreationGovClient(httpClient, 1, Duration.ofSeconds(1));
+
         assertThrows(IOException.class, () -> client.getPermitAvailability("233260"));
     }
 
     @Test
-    void getPermitAvailability_Retry() throws IOException {
-        // Mock first two failures, then success
+    void getPermitAvailability_Retry() throws Exception {
         String jsonResponse = "{\n" +
             "    \"availability\": [\n" +
             "        {\n" +
@@ -85,29 +74,77 @@ class RecreationGovClientTest {
             "        }\n" +
             "    ]\n" +
             "}";
-        
-        HttpEntity entity = mock(HttpEntity.class);
-        when(entity.getContent()).thenReturn(new ByteArrayInputStream(jsonResponse.getBytes(StandardCharsets.UTF_8)));
-        when(response.getEntity()).thenReturn(entity);
-        when(response.getStatusLine())
-            .thenReturn(new org.apache.http.message.BasicStatusLine(
-                org.apache.http.HttpVersion.HTTP_1_1, 500, "Internal Server Error"))
-            .thenReturn(new org.apache.http.message.BasicStatusLine(
-                org.apache.http.HttpVersion.HTTP_1_1, 500, "Internal Server Error"))
-            .thenReturn(new org.apache.http.message.BasicStatusLine(
-                org.apache.http.HttpVersion.HTTP_1_1, 200, "OK"));
-        
-        when(httpClient.execute(any())).thenReturn(response);
 
-        // Test the method
+        CloseableHttpResponse err1 = new SimpleCloseableHttpResponse(
+            new BasicStatusLine(HttpVersion.HTTP_1_1, 500, "Internal Server Error"),
+            null
+        );
+        CloseableHttpResponse err2 = new SimpleCloseableHttpResponse(
+            new BasicStatusLine(HttpVersion.HTTP_1_1, 500, "Internal Server Error"),
+            null
+        );
+        CloseableHttpResponse ok = new SimpleCloseableHttpResponse(
+            new BasicStatusLine(HttpVersion.HTTP_1_1, 200, "OK"),
+            new StringEntity(jsonResponse, StandardCharsets.UTF_8)
+        );
+
+        TestHttpClient httpClient = new TestHttpClient(err1, err2, ok);
+        RecreationGovClient client = new RecreationGovClient(httpClient, 3, Duration.ofSeconds(1));
+
         JsonNode result = client.getPermitAvailability("233260");
-
-        // Verify the result
         assertNotNull(result);
         assertTrue(result.has("availability"));
         assertEquals(1, result.get("availability").size());
-        
-        // Verify that execute was called 3 times
-        verify(httpClient, times(3)).execute(any());
+        assertEquals("2024-08-01", result.get("availability").get(0).get("date").asText());
+    }
+
+    private static <T extends Throwable> T findCause(Throwable throwable, Class<T> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    // Simple HTTP client that returns pre-seeded responses in order
+    static class TestHttpClient extends CloseableHttpClient {
+        private final Deque<CloseableHttpResponse> responses = new ArrayDeque<>();
+
+        TestHttpClient(CloseableHttpResponse... responses) {
+            for (CloseableHttpResponse r : responses) {
+                this.responses.add(r);
+            }
+        }
+
+        @Override
+        protected CloseableHttpResponse doExecute(HttpHost target, HttpRequest request, HttpContext context) {
+            CloseableHttpResponse response = responses.pollFirst();
+            if (response == null) {
+                return new SimpleCloseableHttpResponse(new BasicStatusLine(HttpVersion.HTTP_1_1, 500, "No more responses"), null);
+            }
+            return response;
+        }
+
+        @Override
+        public void close() {}
+
+        @Override
+        public HttpParams getParams() { return null; }
+
+        @Override
+        public ClientConnectionManager getConnectionManager() { return null; }
+    }
+
+    // Minimal CloseableHttpResponse backed by BasicHttpResponse
+    static class SimpleCloseableHttpResponse extends BasicHttpResponse implements CloseableHttpResponse {
+        SimpleCloseableHttpResponse(StatusLine statusline, HttpEntity entity) {
+            super(statusline);
+            setEntity(entity);
+        }
+        @Override
+        public void close() {}
     }
 } 

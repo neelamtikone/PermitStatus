@@ -54,6 +54,20 @@ public class RecreationGovClient {
     }
 
     /**
+     * Creates a new RecreationGovClient with a provided HTTP client.
+     * Intended for testing to allow injecting a mocked client.
+     *
+     * @param httpClient The HTTP client to use
+     * @param maxRetries Maximum number of retry attempts for failed requests
+     * @param timeout Request timeout duration
+     */
+    public RecreationGovClient(CloseableHttpClient httpClient, int maxRetries, Duration timeout) {
+        this.maxRetries = maxRetries;
+        this.timeout = timeout;
+        this.httpClient = httpClient;
+    }
+
+    /**
      * Retrieves permit availability information for a specific permit ID.
      *
      * @param permitId The ID of the permit to check
@@ -87,12 +101,30 @@ public class RecreationGovClient {
                     throw new RuntimeException(e);
                 }
             }, maxRetries, 1000, 10000);
-        } catch (RuntimeException e) {
-            if (e.getCause() instanceof IOException) {
-                throw (IOException) e.getCause();
+        } catch (Exception e) {
+            IOException io = findCause(e, IOException.class);
+            if (io != null) {
+                throw io;
             }
-            throw e;
+            if (e instanceof IOException) {
+                throw (IOException) e;
+            }
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            }
+            throw new RuntimeException(e);
         }
+    }
+
+    private static <T extends Throwable> T findCause(Throwable throwable, Class<T> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     /**

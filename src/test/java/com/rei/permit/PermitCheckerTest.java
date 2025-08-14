@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -13,30 +11,20 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-class PermitCheckerTest {
-    @Mock
-    private RecreationGovClient apiClient;
-    
-    @Mock
-    private SmsNotificationService smsService;
-    
-    private PermitChecker permitChecker;
+public class PermitCheckerTest {
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
-        MockitoAnnotations.openMocks(this);
-        permitChecker = new PermitChecker();
         objectMapper = new ObjectMapper();
+        System.setProperty("sms.test.mode", "true");
+        SmsNotificationService.initialize();
     }
 
     @Test
-    void checkPermitAvailability_Available() throws IOException {
-        // Prepare test data
+    void checkPermitAvailability_Available() throws Exception {
         String permitId = "233260";
         String permitName = "Enchantments";
         String permitUrl = "https://www.recreation.gov/permits/233260";
@@ -44,10 +32,8 @@ class PermitCheckerTest {
             LocalDate.parse("2024-08-01"),
             LocalDate.parse("2024-08-02")
         ));
-        
         Permit permit = new Permit(permitId, permitName, permitUrl, targetDates);
-        
-        // Mock API response
+
         String jsonResponse = "{\n" +
             "    \"availability\": [\n" +
             "        {\n" +
@@ -56,20 +42,28 @@ class PermitCheckerTest {
             "        }\n" +
             "    ]\n" +
             "}";
-        
         JsonNode jsonNode = objectMapper.readTree(jsonResponse);
-        when(apiClient.getPermitAvailability(permitId)).thenReturn(jsonNode);
 
-        // Test the method
-        permitChecker.checkPermitAvailability(permit);
+        // Stub client
+        RecreationGovClient stubClient = new RecreationGovClient(1, java.time.Duration.ofSeconds(1)) {
+            @Override
+            public JsonNode getPermitAvailability(String id) {
+                return jsonNode;
+            }
+        };
+        PermitChecker.setApiClientForTesting(stubClient);
 
-        // Verify SMS notification was sent
-        verify(smsService, times(1)).sendPermitAvailableNotification(eq(permitId), anyString());
+        // Execute
+        SmsNotificationServiceTestHelper.clearLastMessage();
+        PermitChecker.checkPermitAvailability(permit);
+
+        // Verify SMS was "sent" in test mode
+        assertNotNull(SmsNotificationService.getLastMessageBodyForTesting());
+        assertTrue(SmsNotificationService.getLastMessageBodyForTesting().contains("2024-08-01"));
     }
 
     @Test
-    void checkPermitAvailability_NotAvailable() throws IOException {
-        // Prepare test data
+    void checkPermitAvailability_NotAvailable() throws Exception {
         String permitId = "233260";
         String permitName = "Enchantments";
         String permitUrl = "https://www.recreation.gov/permits/233260";
@@ -77,10 +71,8 @@ class PermitCheckerTest {
             LocalDate.parse("2024-08-01"),
             LocalDate.parse("2024-08-02")
         ));
-        
         Permit permit = new Permit(permitId, permitName, permitUrl, targetDates);
-        
-        // Mock API response with no availability
+
         String jsonResponse = "{\n" +
             "    \"availability\": [\n" +
             "        {\n" +
@@ -89,20 +81,24 @@ class PermitCheckerTest {
             "        }\n" +
             "    ]\n" +
             "}";
-        
         JsonNode jsonNode = objectMapper.readTree(jsonResponse);
-        when(apiClient.getPermitAvailability(permitId)).thenReturn(jsonNode);
 
-        // Test the method
-        permitChecker.checkPermitAvailability(permit);
+        RecreationGovClient stubClient = new RecreationGovClient(1, java.time.Duration.ofSeconds(1)) {
+            @Override
+            public JsonNode getPermitAvailability(String id) {
+                return jsonNode;
+            }
+        };
+        PermitChecker.setApiClientForTesting(stubClient);
 
-        // Verify no SMS notification was sent
-        verify(smsService, never()).sendPermitAvailableNotification(anyString(), anyString());
+        SmsNotificationServiceTestHelper.clearLastMessage();
+        PermitChecker.checkPermitAvailability(permit);
+
+        assertNull(SmsNotificationService.getLastMessageBodyForTesting());
     }
 
     @Test
-    void checkPermitAvailability_ApiError() throws IOException {
-        // Prepare test data
+    void checkPermitAvailability_ApiError() {
         String permitId = "233260";
         String permitName = "Enchantments";
         String permitUrl = "https://www.recreation.gov/permits/233260";
@@ -110,16 +106,31 @@ class PermitCheckerTest {
             LocalDate.parse("2024-08-01"),
             LocalDate.parse("2024-08-02")
         ));
-        
         Permit permit = new Permit(permitId, permitName, permitUrl, targetDates);
-        
-        // Mock API error
-        when(apiClient.getPermitAvailability(permitId)).thenThrow(new IOException("API Error"));
 
-        // Test the method
-        permitChecker.checkPermitAvailability(permit);
+        RecreationGovClient stubClient = new RecreationGovClient(1, java.time.Duration.ofSeconds(1)) {
+            @Override
+            public JsonNode getPermitAvailability(String id) throws IOException {
+                throw new IOException("API Error");
+            }
+        };
+        PermitChecker.setApiClientForTesting(stubClient);
 
-        // Verify no SMS notification was sent
-        verify(smsService, never()).sendPermitAvailableNotification(anyString(), anyString());
+        SmsNotificationServiceTestHelper.clearLastMessage();
+        assertThrows(IOException.class, () -> PermitChecker.checkPermitAvailability(permit));
+        assertNull(SmsNotificationService.getLastMessageBodyForTesting());
+    }
+}
+
+// Helper to reset captured message between tests
+class SmsNotificationServiceTestHelper {
+    static void clearLastMessage() {
+        System.setProperty("sms.test.mode", "true");
+        // Reset by sending an empty message
+        try {
+            java.lang.reflect.Field f = com.rei.permit.SmsNotificationService.class.getDeclaredField("lastMessageBodyForTesting");
+            f.setAccessible(true);
+            f.set(null, null);
+        } catch (Exception ignored) {}
     }
 } 

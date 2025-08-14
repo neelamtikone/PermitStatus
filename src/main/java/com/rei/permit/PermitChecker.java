@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit;
 
 public class PermitChecker {
     private static final Logger logger = LoggerFactory.getLogger(PermitChecker.class);
-    private static final RecreationGovClient apiClient = new RecreationGovClient();
+    private static RecreationGovClient apiClient = new RecreationGovClient();
     
     // Permit IDs for Enchantments and Mount Whitney
     private static final List<Permit> PERMITS = Arrays.asList(
@@ -36,6 +36,11 @@ public class PermitChecker {
     // Keep track of notified dates with their timestamps
     private static final Map<String, LocalDateTime> notifiedDates = new HashMap<>();
     private static final int NOTIFICATION_TTL_HOURS = 24; // Notifications expire after 24 hours
+
+    // Test-only hook to inject a mock client
+    static void setApiClientForTesting(RecreationGovClient client) {
+        apiClient = client;
+    }
 
     public static void main(String[] args) {
         logger.info("Starting Permit Status Checker");

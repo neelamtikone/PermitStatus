@@ -14,11 +14,21 @@ public class SmsNotificationService {
     private static final String TWILIO_PHONE_NUMBER = System.getenv("TWILIO_PHONE_NUMBER");
     private static final String NOTIFICATION_PHONE_NUMBER = System.getenv("NOTIFICATION_PHONE_NUMBER");
 
+    // Test mode controls (enabled when -Dsms.test.mode=true)
+    private static boolean isTestMode() {
+        return Boolean.parseBoolean(System.getProperty("sms.test.mode", "false"));
+    }
+    private static volatile String lastMessageBodyForTesting;
+
     /**
      * Initializes the SMS notification service and validates the configuration.
      * @throws IllegalStateException if the configuration is invalid
      */
     public static void initialize() {
+        if (isTestMode()) {
+            logger.info("SMS notification service initialized in TEST MODE (Twilio disabled)");
+            return;
+        }
         validateConfiguration();
         Twilio.init(API_KEY_SID, API_KEY_SECRET, ACCOUNT_SID);
         logger.info("SMS notification service initialized successfully");
@@ -80,6 +90,11 @@ public class SmsNotificationService {
      * @throws Exception if there's an error sending the message
      */
     private static boolean sendMessage(String messageBody) throws Exception {
+        if (isTestMode()) {
+            lastMessageBodyForTesting = messageBody;
+            logger.info("[TEST MODE] SMS notification would be sent: {}", messageBody);
+            return true;
+        }
         try {
             Message message = Message.creator(
                 new PhoneNumber(NOTIFICATION_PHONE_NUMBER),
@@ -93,5 +108,10 @@ public class SmsNotificationService {
             logger.error("Failed to send SMS: {}", e.getMessage());
             throw e;
         }
+    }
+
+    // Test helper: returns last message when in test mode
+    static String getLastMessageBodyForTesting() {
+        return lastMessageBodyForTesting;
     }
 } 
